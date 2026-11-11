@@ -1,0 +1,78 @@
+name: Build and release MMDB
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: mmdb-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fetch upstream data
+        uses: actions/checkout@v4
+        with:
+          repository: metowolf/iplist
+          ref: master
+          path: upstream
+          sparse-checkout: data
+          persist-credentials: false
+      - name: Test
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Build and validate database
+        run: go run . --data-dir upstream/data --output dist/iplist.mmdb
+      - name: Prepare provenance and checksums
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          upstream_sha=$(git -C upstream rev-parse HEAD)
+          tag="data-${upstream_sha:0:12}-${BUILD_SHA:0:12}"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          python3 - "$upstream_sha" "$BUILD_SHA" <<'PY'
+          import json, sys
+          from datetime import datetime, timezone
+          with open('dist/build-info.json', 'w') as f:
+              json.dump({'upstream': 'metowolf/iplist', 'upstream_commit': sys.argv[1],
+                         'generator_commit': sys.argv[2], 'built_at': datetime.now(timezone.utc).isoformat()}, f, indent=2)
+          PY
+          cd dist
+          sha256sum iplist.mmdb build-info.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iplist-mmdb
+          path: dist/
+      - name: Publish release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json 2> release-error.log; then
+            if python3 -c 'import json; import sys; sys.exit(0 if json.load(open("release.json"))["isDraft"] else 1)'; then
+              gh release upload "$RELEASE_TAG" dist/* --clobber
+              gh release edit "$RELEASE_TAG" --draft=false --latest
+            else
+              echo "This upstream and generator revision is already published."
+            fi
+          else
+            # Creation fails safely on authentication/API errors; never overwrite a published release.
+            cat dist/build-info.json > release-notes.txt
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --title "IP location database $RELEASE_TAG" --notes-file release-notes.txt
+            gh release upload "$RELEASE_TAG" dist/*
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi
