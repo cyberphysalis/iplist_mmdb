@@ -5,24 +5,26 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"github.com/oschwald/maxminddb-golang"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
+	geoip2 "github.com/oschwald/geoip2-golang"
+	"github.com/oschwald/maxminddb-golang"
 )
 
 // LocationInfo 存储位置信息
 type LocationInfo struct {
-	CountryCode    string `maxminddb:"country_code"`
-	CountryName    string `maxminddb:"country_name"`
-	ProvinceCode   string `maxminddb:"province_code"`
-	ProvinceName   string `maxminddb:"province_name"`
-	ProvinceEnName string `maxminddb:"province_en_name"`
+	CountryCode    string
+	CountryName    string
+	ProvinceCode   string
+	ProvinceName   string
+	ProvinceEnName string
 }
 
 var dataDir = flag.String("data-dir", "upstream/data", "upstream data directory")
@@ -33,7 +35,7 @@ func main() {
 	// 创建 MMDB writer
 	writer, err := mmdbwriter.New(
 		mmdbwriter.Options{
-			DatabaseType: "iplist-location",
+			DatabaseType: "GeoIP2-City",
 			Description: map[string]string{
 				"en": "IP Location Database based on OpenIPDB",
 				"zh": "基于 OpenIPDB 的 IP 地理位置数据库",
@@ -147,17 +149,17 @@ func loadChinaCityData(writer *mmdbwriter.Tree) error {
 		if i == 0 {
 			continue
 		}
-		if len(record) < 4 {
-			continue
+		if len(record) != 5 {
+			return fmt.Errorf("invalid province mapping row %d", i+1)
 		}
 
 		path := strings.TrimSpace(record[0])
 		name := strings.TrimSpace(record[1])
-		provinceCode := strings.TrimSpace(record[2])
+		provinceCode := strings.TrimSpace(record[4])
 		enName := strings.TrimSpace(record[3])
 
-		if path == "" || provinceCode == "" {
-			continue
+		if path == "" || len(provinceCode) != 2 || provinceCode != strings.ToUpper(provinceCode) {
+			return fmt.Errorf("invalid province ISO mapping row %d", i+1)
 		}
 
 		// 读取该省份的 IP 列表
@@ -202,14 +204,13 @@ func loadIPRanges(writer *mmdbwriter.Tree, path string, info LocationInfo) error
 
 		// 将数据写入 MMDB
 		record := mmdbtype.Map{
-			"country_code": mmdbtype.String(info.CountryCode),
-			"country_name": mmdbtype.String(info.CountryName),
+			"country": mmdbtype.Map{"iso_code": mmdbtype.String(info.CountryCode), "names": mmdbtype.Map{"zh-CN": mmdbtype.String(info.CountryName)}},
 		}
-
 		if info.ProvinceCode != "" {
-			record["province_code"] = mmdbtype.String(info.ProvinceCode)
-			record["province_name"] = mmdbtype.String(info.ProvinceName)
-			record["province_en_name"] = mmdbtype.String(info.ProvinceEnName)
+			record["subdivisions"] = mmdbtype.Slice{mmdbtype.Map{
+				"iso_code": mmdbtype.String(info.ProvinceCode),
+				"names":    mmdbtype.Map{"zh-CN": mmdbtype.String(info.ProvinceName), "en": mmdbtype.String(info.ProvinceEnName)},
+			}}
 		}
 
 		if err := writer.Insert(network, record); err != nil {
@@ -240,30 +241,38 @@ func validate(path string) error {
 	if err := db.Verify(); err != nil {
 		return err
 	}
-	if db.Metadata.DatabaseType != "iplist-location" {
+	if db.Metadata.DatabaseType != "GeoIP2-City" {
 		return fmt.Errorf("unexpected database type")
 	}
+	sdk, err := geoip2.Open(path)
+	if err != nil {
+		return err
+	}
+	defer sdk.Close()
 	networks := db.Networks()
 	count := 0
 	for networks.Next() {
-		var record LocationInfo
+		var record geoip2.City
 		network, err := networks.Network(&record)
 		if err != nil {
 			return err
 		}
-		if len(record.CountryCode) != 2 || record.CountryName == "" {
+		if len(record.Country.IsoCode) != 2 || record.Country.Names["zh-CN"] == "" {
 			return fmt.Errorf("invalid country record at %s", network)
 		}
-		if record.ProvinceCode != "" && (record.ProvinceName == "" || record.ProvinceEnName == "") {
-			return fmt.Errorf("incomplete province at %s", network)
+		for _, subdivision := range record.Subdivisions {
+			if len(subdivision.IsoCode) != 2 || subdivision.Names["zh-CN"] == "" || subdivision.Names["en"] == "" {
+				return fmt.Errorf("incomplete province at %s", network)
+			}
 		}
-		var found LocationInfo
-		if err := db.Lookup(network.IP, &found); err != nil {
+		found, err := sdk.City(network.IP)
+		if err != nil {
 			return err
 		}
-		if found != record {
-			return fmt.Errorf("lookup mismatch at %s", network)
+		if !reflect.DeepEqual(*found, record) {
+			return fmt.Errorf("SDK lookup mismatch at %s", network)
 		}
+
 		count++
 	}
 	if err := networks.Err(); err != nil {
