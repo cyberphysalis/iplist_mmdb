@@ -79,10 +79,10 @@ jobs:
           else
             # Creation fails safely on authentication/API errors; never overwrite a published release.
             cat > release-notes.txt <<'NOTES'
-            GeoIP2-compatible schema: country.iso_code, country.names, subdivisions[].iso_code and names.
-            Breaking change: legacy flat country_code/province_code fields are removed. Province codes now use ISO 3166-2 suffixes.
-            Validated with Go and official Python GeoIP2 SDKs. Country/province data only; no city coordinates or registered-country data.
-            NOTES
+          GeoIP2-compatible schema: country.iso_code, country.names, subdivisions[].iso_code and names.
+          Breaking change: legacy flat country_code/province_code fields are removed. Province codes now use ISO 3166-2 suffixes.
+          Validated with Go and official Python GeoIP2 SDKs. Country/province data only; no city coordinates or registered-country data.
+          NOTES
             cat dist/build-info.json >> release-notes.txt
             gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --title "IP location database $RELEASE_TAG" --notes-file release-notes.txt
             gh release upload "$RELEASE_TAG" dist/*
