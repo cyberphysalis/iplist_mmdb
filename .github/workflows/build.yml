@@ -1,7 +1,7 @@
 name: Build and release MMDB
 on:
   schedule:
-    - cron: '23 * * * *'
+    - cron: '23 0 * * 1'
   workflow_dispatch:
   push:
     branches: [main]
