@@ -9,6 +9,7 @@ import maxminddb
 def check(path):
     seen = set()
     provinces = set()
+    cities = set()
     with maxminddb.open_database(path) as raw, geoip2.database.Reader(path) as sdk:
         assert sdk.metadata().database_type == 'GeoIP2-City'
         for network, record in raw:
@@ -26,12 +27,17 @@ def check(path):
                 assert actual.iso_code == wanted['iso_code']
                 assert actual.names == wanted['names']
                 provinces.add(actual.iso_code)
-            assert not city.city.names
+            assert city.city.names == record.get('city', {}).get('names', {})
+            assert city.city.geoname_id is None
+            if city.city.names:
+                assert city.subdivisions
+                cities.add(city.city.names['zh-CN'])
             assert city.location.latitude is None
             assert city.registered_country.iso_code is None
         assert seen, 'empty database'
         assert provinces, 'no province records'
-    print(f'Official Python SDK: validated {len(seen)} distinct records, {len(provinces)} provinces')
+        assert cities, 'no city records'
+    print(f'Official Python SDK: validated {len(seen)} distinct records, {len(provinces)} provinces, {len(cities)} cities')
 
 
 if __name__ == '__main__':

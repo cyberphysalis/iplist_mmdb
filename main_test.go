@@ -33,6 +33,14 @@ func TestBuildRoundTrip(t *testing.T) {
 	if err := loadIPRanges(tree, "data/province.txt", province); err != nil {
 		t.Fatal(err)
 	}
+	city := province
+	city.CityName = "北京市"
+	if err := os.WriteFile(filepath.Join(dir, "city.txt"), []byte("1.0.0.0/26\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadIPRanges(tree, "data/city.txt", city); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "test.mmdb")
 	f, err := os.Create(path)
 	if err != nil {
@@ -52,7 +60,7 @@ func TestBuildRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for ip, want := range map[string]LocationInfo{"1.0.0.1": province, "1.0.0.200": country, "2001:4860::1": country} {
+	for ip, want := range map[string]LocationInfo{"1.0.0.1": city, "1.0.0.100": province, "1.0.0.200": country, "2001:4860::1": country} {
 		got, err := db.City(net.ParseIP(ip))
 		if err != nil {
 			t.Fatal(err)
@@ -66,6 +74,9 @@ func TestBuildRoundTrip(t *testing.T) {
 			}
 		} else if len(got.Subdivisions) != 1 || got.Subdivisions[0].IsoCode != want.ProvinceCode || got.Subdivisions[0].Names["zh-CN"] != want.ProvinceName || got.Subdivisions[0].Names["en"] != want.ProvinceEnName {
 			t.Fatalf("subdivision mismatch: %+v", got)
+		}
+		if got.City.Names["zh-CN"] != want.CityName {
+			t.Fatalf("city mismatch: %+v", got.City)
 		}
 		countryResult, err := db.Country(net.ParseIP(ip))
 		if err != nil || countryResult.Country.IsoCode != want.CountryCode {

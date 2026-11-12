@@ -25,6 +25,7 @@ type LocationInfo struct {
 	ProvinceCode   string
 	ProvinceName   string
 	ProvinceEnName string
+	CityName       string
 }
 
 var dataDir = flag.String("data-dir", "upstream/data", "upstream data directory")
@@ -55,6 +56,10 @@ func main() {
 	// 读取中国省级数据
 	if err := loadChinaCityData(writer); err != nil {
 		log.Fatalf("Failed to load China city data: %v", err)
+	}
+
+	if err := loadCityData(writer); err != nil {
+		log.Fatal(err)
 	}
 
 	// 写入到文件
@@ -213,6 +218,9 @@ func loadIPRanges(writer *mmdbwriter.Tree, path string, info LocationInfo) error
 			}}
 		}
 
+		if info.CityName != "" {
+			record["city"] = mmdbtype.Map{"names": mmdbtype.Map{"zh-CN": mmdbtype.String(info.CityName)}}
+		}
 		if err := writer.Insert(network, record); err != nil {
 			return fmt.Errorf("insert %s: %w", line, err)
 		}
@@ -282,5 +290,64 @@ func validate(path string) error {
 		return fmt.Errorf("empty database")
 	}
 	fmt.Printf("Validated %d networks\n", count)
+	return nil
+}
+
+// Empty city names explicitly mark aggregated provincial county groups.
+func loadCityData(writer *mmdbwriter.Tree) error {
+	f, err := os.Open("cncity_name_code.csv")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	provinces, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		return err
+	}
+	byCode := map[string]LocationInfo{}
+	for _, row := range provinces[1:] {
+		if len(row) != 5 {
+			return fmt.Errorf("invalid province mapping")
+		}
+		byCode[row[2]] = LocationInfo{CountryCode: "CN", CountryName: "中国", ProvinceCode: row[4], ProvinceName: row[1], ProvinceEnName: row[3]}
+	}
+	f2, err := os.Open("city_name_code.csv")
+	if err != nil {
+		return err
+	}
+	defer f2.Close()
+	cities, err := csv.NewReader(f2).ReadAll()
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, row := range cities[1:] {
+		if len(row) != 2 || len(row[0]) != 6 || seen[row[0]] {
+			return fmt.Errorf("invalid/duplicate city mapping: %v", row)
+		}
+		code := row[0]
+		seen[code] = true
+		info, ok := byCode[code[:2]]
+		if !ok {
+			return fmt.Errorf("missing province for %s", code)
+		}
+		if row[1] == "" {
+			continue
+		}
+		info.CityName = row[1]
+		if err := loadIPRanges(writer, "data/cncity/"+code+".txt", info); err != nil {
+			return err
+		}
+	}
+	files, err := filepath.Glob(filepath.Join(*dataDir, "cncity", "*.txt"))
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		code := strings.TrimSuffix(filepath.Base(file), ".txt")
+		if len(code) == 6 && !strings.HasSuffix(code, "0000") && !seen[code] {
+			return fmt.Errorf("unmapped city data: %s", code)
+		}
+	}
 	return nil
 }

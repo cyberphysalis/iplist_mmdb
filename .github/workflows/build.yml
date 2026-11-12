@@ -53,7 +53,7 @@ jobs:
           import json, sys
           from datetime import datetime, timezone
           with open('dist/build-info.json', 'w') as f:
-              json.dump({'schema': 'geoip2-city-v1', 'database_type': 'GeoIP2-City', 'upstream': 'metowolf/iplist', 'upstream_commit': sys.argv[1],
+              json.dump({'schema': 'geoip2-city-v2', 'database_type': 'GeoIP2-City', 'upstream': 'metowolf/iplist', 'upstream_commit': sys.argv[1],
                          'generator_commit': sys.argv[2], 'built_at': datetime.now(timezone.utc).isoformat()}, f, indent=2)
           PY
           cd dist
@@ -81,7 +81,7 @@ jobs:
             cat > release-notes.txt <<'NOTES'
           GeoIP2-compatible schema: country.iso_code, country.names, subdivisions[].iso_code and names.
           Breaking change: legacy flat country_code/province_code fields are removed. Province codes now use ISO 3166-2 suffixes.
-          Validated with Go and official Python GeoIP2 SDKs. Country/province data only; no city coordinates or registered-country data.
+          Validated with Go and official Python GeoIP2 SDKs. Includes Chinese city names where available; no coordinates or registered-country data.
           NOTES
             cat dist/build-info.json >> release-notes.txt
             gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --title "IP location database $RELEASE_TAG" --notes-file release-notes.txt

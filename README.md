@@ -30,7 +30,8 @@ go run . --data-dir upstream/data --output dist/iplist.mmdb
   "country": {"iso_code": "CN", "names": {"zh-CN": "中国"}},
   "subdivisions": [
     {"iso_code": "GD", "names": {"zh-CN": "广东省", "en": "Guangdong"}}
-  ]
+  ],
+  "city": {"names": {"zh-CN": "广州市"}}
 }
 ```
 
@@ -65,3 +66,11 @@ with geoip2.database.Reader("dist/iplist.mmdb") as reader:
 GitHub Actions 每周一 UTC 00:23（新加坡时间 08:23）运行。
 
 数据来源和使用条款请参见上游项目及其 OpenIPDB/IPinfo/bgp.tools 数据源；本项目不额外授予上游数据的使用权。
+
+## 中文城市名称
+
+`city.names["zh-CN"]` 提供有市级数据的国内城市中文名称。生成顺序为国家、再省级、再市级；市级记录保留所属国家和省份，无市级信息的 IP 继续返回省级或国家记录。Python 通过 `result.city.names.get("zh-CN")` 读取。
+
+`city_name_code.csv` 根据上游 `docs/cncity.md` 的中文名称整理，并补充北京、天津、上海、重庆的市级汇总名称及三沙市。映射基于上游提交 `6f8005e303b7` 的数据快照。行政区代码仅用于文件匹配，不写入 `geoname_id`。目前不提供城市英文名、坐标或 GeoNames ID。
+
+419000、429000、469000、659000 是省直辖县级单位的汇总，无法从这些汇总 IP 段分辨具体城市，因此映射名称留空，保留省级结果。上游新增未映射市级文件时构建失败，需更新映射后再发布，避免静默遗漏。
